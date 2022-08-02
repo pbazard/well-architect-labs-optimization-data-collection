@@ -1,0 +1,477 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Retrieves EC2 Metric data
+Parameters:
+  DatabaseName:
+    Type: String
+    Description: Name of the Athena database to be created to hold lambda information
+    Default: optimization_data
+  DestinationBucket:
+    Type: String
+    Description: Name of the S3 Bucket to be created to hold data information
+    AllowedPattern: (?=^.{3,63}$)(?!^(\d+\.)+\d+$)(^(([a-z0-9]|[a-z0-9][a-z0-9\-]*[a-z0-9])\.)*([a-z0-9]|[a-z0-9][a-z0-9\-]*[a-z0-9])$)
+  DestinationBucketARN:
+    Type: String
+    Description: ARN of the S3 Bucket that exists or needs to be created to hold metrics information
+  MultiAccountRoleName:
+    Type: String
+    Description: Name of the IAM role deployed in all accounts which can retrieve AWS Data.
+  CFDataName:
+    Type: String
+    Description: The name of what this cf is doing.
+    Default: ec2_metrics
+  DAYS:
+    Type: Number
+    Description: Number of days going back that you want to get data for
+    Default: 1
+  GlueRoleArn:
+    Type: String
+    Description: ARN of the IAM role deployed to use for glue.
+  RolePrefix:
+    Type: String
+    Description: This prefix will be placed in front of all roles created. Note you may wish to add a dash at the end to make more readable
+Outputs:
+  AthenaSavedQuery:
+    Description: This saved query will provide you a summary of your lambda data
+    Value:
+      Ref: AthenaQuery
+  LambdaRoleARN:
+    Description: Role for Lambda execution of lambda data.
+    Value:
+      Fn::GetAtt:
+        - LambdaRole
+        - Arn
+  SQSUrl:
+    Description: TaskQueue URL the account collector lambda
+    Value: !Ref TaskQueue
+Resources:
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${RolePrefix}Lambda-Role-${CFDataName}"
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+        Version: 2012-10-17
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSLambdaExecute
+      Path: /
+      Policies:
+        - PolicyName: !Sub "Assume-Management-${CFDataName}-Account-Role"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action: "sts:AssumeRole"
+                Resource: "*"
+        - PolicyName: !Sub "${CFDataName}-Access"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "s3:PutObject"
+                  - "s3:ListBucket"
+                  - "s3:GetBucketLocation"
+                Resource: !Ref  DestinationBucketARN
+              - Effect: "Allow"
+                Action:
+                  - "glue:StartCrawler"
+                Resource: !Sub "arn:aws:glue:${AWS::Region}:${AWS::AccountId}:crawler/${CFDataName}Crawler"
+              - Effect: "Allow"
+                Action:
+                  - "cloudwatch:GetMetricStatistics"
+                Resource: "*"  ## only * can be used as a Resource for this action
+              - Effect: "Allow"
+                Action:
+                  - "sqs:ReceiveMessage"
+                  - "sqs:DeleteMessage"
+                  - "sqs:GetQueueAttributes"
+                Resource: !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:EC2UtilizationModule-TaskQueue
+              - Effect: "Allow"
+                Action:
+                  - "ec2:DescribeAccountAttributes"
+                  - "ec2:DescribeAddresses"
+                  - "ec2:DescribeAddressesAttribute"
+                  - "ec2:DescribeAggregateIdFormat"
+                  - "ec2:DescribeAvailabilityZones"
+                  - "ec2:DescribeBundleTasks"
+                  - "ec2:DescribeByoipCidrs"
+                  - "ec2:DescribeCapacityReservationFleets"
+                  - "ec2:DescribeCapacityReservations"
+                  - "ec2:DescribeCarrierGateways"
+                  - "ec2:DescribeClassicLinkInstances"
+                  - "ec2:DescribeClientVpnAuthorizationRules"
+                  - "ec2:DescribeClientVpnConnections"
+                  - "ec2:DescribeClientVpnEndpoints"
+                  - "ec2:DescribeClientVpnRoutes"
+                  - "ec2:DescribeClientVpnTargetNetworks"
+                  - "ec2:DescribeCoipPools"
+                  - "ec2:DescribeConversionTasks"
+                  - "ec2:DescribeCustomerGateways"
+                  - "ec2:DescribeDhcpOptions"
+                  - "ec2:DescribeEgressOnlyInternetGateways"
+                  - "ec2:DescribeElasticGpus"
+                  - "ec2:DescribeExportImageTasks"
+                  - "ec2:DescribeExportTasks"
+                  - "ec2:DescribeFastLaunchImages"
+                  - "ec2:DescribeFastSnapshotRestores"
+                  - "ec2:DescribeFleetHistory"
+                  - "ec2:DescribeFleetInstances"
+                  - "ec2:DescribeFleets"
+                  - "ec2:DescribeFlowLogs"
+                  - "ec2:DescribeFpgaImageAttribute"
+                  - "ec2:DescribeFpgaImages"
+                  - "ec2:DescribeHostReservationOfferings"
+                  - "ec2:DescribeHostReservations"
+                  - "ec2:DescribeHosts"
+                  - "ec2:DescribeIamInstanceProfileAssociations"
+                  - "ec2:DescribeIdentityIdFormat"
+                  - "ec2:DescribeIdFormat"
+                  - "ec2:DescribeImageAttribute"
+                  - "ec2:DescribeImages"
+                  - "ec2:DescribeImportImageTasks"
+                  - "ec2:DescribeImportSnapshotTasks"
+                  - "ec2:DescribeInstanceAttribute"
+                  - "ec2:DescribeInstanceCreditSpecifications"
+                  - "ec2:DescribeInstanceEventNotificationAttributes"
+                  - "ec2:DescribeInstanceEventWindows"
+                  - "ec2:DescribeInstances"
+                  - "ec2:DescribeInstanceStatus"
+                  - "ec2:DescribeInstanceTypeOfferings"
+                  - "ec2:DescribeInstanceTypes"
+                  - "ec2:DescribeInternetGateways"
+                  - "ec2:DescribeIpamPools"
+                  - "ec2:DescribeIpams"
+                  - "ec2:DescribeIpamScopes"
+                  - "ec2:DescribeIpv6Pools"
+                  - "ec2:DescribeKeyPairs"
+                  - "ec2:DescribeLaunchTemplates"
+                  - "ec2:DescribeLaunchTemplateVersions"
+                  - "ec2:DescribeLocalGatewayRouteTables"
+                  - "ec2:DescribeLocalGatewayRouteTableVirtualInterfaceGroupAssociations"
+                  - "ec2:DescribeLocalGatewayRouteTableVpcAssociations"
+                  - "ec2:DescribeLocalGateways"
+                  - "ec2:DescribeLocalGatewayVirtualInterfaceGroups"
+                  - "ec2:DescribeLocalGatewayVirtualInterfaces"
+                  - "ec2:DescribeManagedPrefixLists"
+                  - "ec2:DescribeMovingAddresses"
+                  - "ec2:DescribeNatGateways"
+                  - "ec2:DescribeNetworkAcls"
+                  - "ec2:DescribeNetworkInsightsAccessScopeAnalyses"
+                  - "ec2:DescribeNetworkInsightsAccessScopes"
+                  - "ec2:DescribeNetworkInsightsAnalyses"
+                  - "ec2:DescribeNetworkInsightsPaths"
+                  - "ec2:DescribeNetworkInterfaceAttribute"
+                  - "ec2:DescribeNetworkInterfacePermissions"
+                  - "ec2:DescribeNetworkInterfaces"
+                  - "ec2:DescribePlacementGroups"
+                  - "ec2:DescribePrefixLists"
+                  - "ec2:DescribePrincipalIdFormat"
+                  - "ec2:DescribePublicIpv4Pools"
+                  - "ec2:DescribeRegions"
+                  - "ec2:DescribeReplaceRootVolumeTasks"
+                  - "ec2:DescribeReservedInstances"
+                  - "ec2:DescribeReservedInstancesListings"
+                  - "ec2:DescribeReservedInstancesModifications"
+                  - "ec2:DescribeReservedInstancesOfferings"
+                  - "ec2:DescribeRouteTables"
+                  - "ec2:DescribeScheduledInstanceAvailability"
+                  - "ec2:DescribeScheduledInstances"
+                  - "ec2:DescribeSecurityGroupReferences"
+                  - "ec2:DescribeSecurityGroupRules"
+                  - "ec2:DescribeSecurityGroups"
+                  - "ec2:DescribeSnapshotAttribute"
+                  - "ec2:DescribeSnapshots"
+                  - "ec2:DescribeSnapshotTierStatus"
+                  - "ec2:DescribeSpotDatafeedSubscription"
+                  - "ec2:DescribeSpotFleetInstances"
+                  - "ec2:DescribeSpotFleetRequestHistory"
+                  - "ec2:DescribeSpotFleetRequests"
+                  - "ec2:DescribeSpotInstanceRequests"
+                  - "ec2:DescribeSpotPriceHistory"
+                  - "ec2:DescribeStaleSecurityGroups"
+                  - "ec2:DescribeStoreImageTasks"
+                  - "ec2:DescribeSubnets"
+                  - "ec2:DescribeTags"
+                  - "ec2:DescribeTrafficMirrorFilters"
+                  - "ec2:DescribeTrafficMirrorSessions"
+                  - "ec2:DescribeTrafficMirrorTargets"
+                  - "ec2:DescribeTransitGatewayAttachments"
+                  - "ec2:DescribeTransitGatewayConnectPeers"
+                  - "ec2:DescribeTransitGatewayConnects"
+                  - "ec2:DescribeTransitGatewayMulticastDomains"
+                  - "ec2:DescribeTransitGatewayPeeringAttachments"
+                  - "ec2:DescribeTransitGatewayPolicyTables"
+                  - "ec2:DescribeTransitGatewayRouteTableAnnouncements"
+                  - "ec2:DescribeTransitGatewayRouteTables"
+                  - "ec2:DescribeTransitGateways"
+                  - "ec2:DescribeTransitGatewayVpcAttachments"
+                  - "ec2:DescribeTrunkInterfaceAssociations"
+                  - "ec2:DescribeVolumeAttribute"
+                  - "ec2:DescribeVolumes"
+                  - "ec2:DescribeVolumesModifications"
+                  - "ec2:DescribeVolumeStatus"
+                  - "ec2:DescribeVpcAttribute"
+                  - "ec2:DescribeVpcClassicLink"
+                  - "ec2:DescribeVpcClassicLinkDnsSupport"
+                  - "ec2:DescribeVpcEndpointConnectionNotifications"
+                  - "ec2:DescribeVpcEndpointConnections"
+                  - "ec2:DescribeVpcEndpoints"
+                  - "ec2:DescribeVpcEndpointServiceConfigurations"
+                  - "ec2:DescribeVpcEndpointServicePermissions"
+                  - "ec2:DescribeVpcEndpointServices"
+                  - "ec2:DescribeVpcPeeringConnections"
+                  - "ec2:DescribeVpcs"
+                  - "ec2:DescribeVpnConnections"
+                  - "ec2:DescribeVpnGateways"
+                Resource: !Sub "arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:*"
+              - Effect: "Allow"
+                Action:
+                  - "ec2:DescribeRegions"
+                Resource: "*"  ## only * can be used as a Resource for this action
+  LambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${CFDataName}-Lambda-Function"
+      Description: !Sub "LambdaFunction to retrieve ${CFDataName}"
+      Runtime: python3.8
+      Code:
+        ZipFile: |
+          import boto3
+          from botocore.exceptions import ClientError
+          import os
+          from boto3.s3.transfer import S3Transfer
+          from datetime import datetime, timedelta, date
+          import json
+          from re import sub
+          import logging
+
+          # Environment Variables
+          DEST_BUCKET = os.environ['S3_BUCKET']
+          DEST_PREFIX = os.environ['DEST_PREFIX']
+
+          functions = {'ec2':
+                           {'regional': 1,
+                            'api': 'ec2',
+                            'functions': [
+                                {'name': 'get_ec2_stats',
+                                 'output_path': 'ec2_stats',
+                                 'output_file_name': 'ec2_stats.json'}
+                            ]
+                            }
+                       }
+
+          METRICS_FOR_INSTANCES = [
+              'CPUUtilization',
+              'NetworkPacketsIn',
+              'NetworkPacketsOut',
+              'NetworkIn',
+              'NetworkOut',
+              'DiskReadBytes',
+              'DiskWriteBytes',
+              'DiskReadOps',
+              'DiskWriteOps',
+              'StatusCheckFailed',
+              'CPUCreditUsage',
+              'CPUCreditBalance',
+              'CPUSurplusCreditBalance',
+              'CPUSurplusCreditsCharged'
+          ]
+
+          TAGS_TO_RETRIEVE = [
+              'Environment',
+              'Schedule',
+              'Application',
+              'Project',
+          ]
+
+          now = datetime.utcnow()
+          DAYS = int(os.environ['DAYS'])
+          past = now - timedelta(days=DAYS)
+          today = datetime.today().strftime('%Y-%m-%d')
+          tod = date.today()
+          year = tod.year
+          month = tod.strftime('%m')
+          future = now  # + timedelta(minutes=10)
+          period = 3600
+          s3client = boto3.client('s3')
+
+
+          def upload_file_to_s3(s3client, bucket_name, src, dest):
+              transfer = S3Transfer(s3client)
+              print("Uploading file %s to %s/%s" % (src, bucket_name, dest))
+              transfer.upload_file(src, bucket_name, dest, extra_args={'ACL': 'bucket-owner-full-control'})
+              print('File upload successful')
+
+
+          def store_data_to_s3(data, s3client, region, service, path, resource_type, resource_value, filename, accountID):
+              filepath = f"/tmp/{region}-{filename}"
+              with open(filepath, 'w') as f:
+                  json.dump(data, f, default=str)
+                  f.write('\n')
+              # Check file size
+              fileSize = os.path.getsize(filepath)
+              if fileSize == 0:
+                  print(f"No data in file for {DEST_PREFIX}")
+              else:
+                  upload_file_to_s3(s3client, DEST_BUCKET, filepath,
+                                    f"{DEST_PREFIX}/{path}/accountid={accountID}/region={region}/{resource_type}={resource_value}/year={year}/month={month}/{today}-{filename}")
+
+
+          def start_crawler():
+              glue_client = boto3.client('glue')
+              try:
+                  glue_client.start_crawler(Name=os.environ["CRAWLER_NAME"])
+                  logging.info("%s" % "crawler started")
+              except Exception as e:
+                  # Send some context about this error to Lambda Logs
+                  logging.info("%s" % e)
+
+
+          def get_ec2_stats(cwclient, client, s3client, region, service, path, filename, accountID):
+              datapoints = {}
+              data = {}
+              ec2_inventory = client.describe_instances()
+
+              if (len(ec2_inventory['Reservations']) > 0):
+                  for ec2 in ec2_inventory['Reservations'][0]['Instances']:
+
+                      for metric in METRICS_FOR_INSTANCES:
+                          results = cwclient.get_metric_statistics(StartTime=past, EndTime=future, MetricName=metric,
+                                                                   Namespace='AWS/EC2',
+                                                                   Statistics=['Average', 'Maximum', 'Minimum'], Period=period,
+                                                                   Dimensions=[
+                                                                       {"Name": "InstanceId", "Value": ec2["InstanceId"]}])
+                          datapoints.update({metric: results['Datapoints']})
+                      ec2["Datapoints"] = datapoints
+                      store_data_to_s3(ec2, s3client, region, service, path, 'ec2_id', ec2['InstanceId'], filename, accountID)
+
+
+          def assume_role(account_id, service, region):
+              role_name = os.environ['ROLENAME']
+              role_arn = f"arn:aws:iam::{account_id}:role/{role_name}"
+              sts_client = boto3.client('sts')
+              logging.info("%s" % account_id)
+
+              try:
+                  assumedRoleObject = sts_client.assume_role(
+                      RoleArn=role_arn,
+                      RoleSessionName="AssumeRoleRoot"
+                  )
+
+                  credentials = assumedRoleObject['Credentials']
+                  client = boto3.client(
+                      service,
+                      aws_access_key_id=credentials['AccessKeyId'],
+                      aws_secret_access_key=credentials['SecretAccessKey'],
+                      aws_session_token=credentials['SessionToken'],
+                      region_name=region
+                  )
+                  return client
+              except ClientError as e:
+                  logging.warning(f"Unexpected error Account {account_id}: {e}")
+                  return None
+
+
+          def lambda_handler(event, context):
+              try:
+                  for record in event['Records']:
+                      body = json.loads(record["body"])
+                      account_id = body["account_id"]
+                      print(account_id)
+                      s3client = boto3.client('s3')
+                      regions = get_supported_regions('ec2')
+
+                      for service in functions.keys():
+                          if functions[service]['regional']:
+                              for region in regions:
+                                  client = assume_role(account_id, functions[service]['api'], region['RegionName'])
+                                  for f in functions[service]['functions']:
+                                      cw_client = boto3.client('cloudwatch', region_name=region['RegionName'])
+                                      data = globals()[f['name']](cw_client, client, s3client, region['RegionName'], service,
+                                                                  f['output_path'], f['output_file_name'], account_id)
+                          else:
+                              client = boto3.client(service)
+                              for f in functions[service]['functions']:
+                                  cw_client = boto3.client('cloudwatch', region_name='us-east-1')
+
+                                  data = globals()[f['name']](cw_client, client, s3client, 'us-east-1', service, f['output_path'],
+                                                              f['output_file_name'], account_id)
+                      start_crawler()
+                      return "Successful"
+              except Exception as e:
+                  # Send some context about this error to Lambda Logs
+                  print("Error")
+                  logging.warning("%s" % e)
+
+
+          def get_supported_regions(service):
+              response = []
+              if service == 'ec2':
+                  ec2_c = boto3.client('ec2')
+                  response = ec2_c.describe_regions()
+              return response['Regions'] if response['Regions'] else []
+
+      Handler: 'index.lambda_handler'
+      MemorySize: 2688
+      Timeout: 300
+      Role:
+        Fn::GetAtt:
+          - LambdaRole
+          - Arn
+      Environment:
+        Variables:
+          S3_BUCKET:
+            !Ref DestinationBucket
+          ACCOUNT_ID: AWS::AccountId
+          DAYS:
+            !Ref DAYS
+          CRAWLER_NAME: !Ref Crawler
+          DEST_PREFIX: !Ref CFDataName
+          ROLENAME: !Ref MultiAccountRoleName
+  Crawler:
+    Type: AWS::Glue::Crawler
+    Properties:
+      Name:
+        !Sub "${CFDataName}Crawler"
+      Role: !Ref GlueRoleArn
+      DatabaseName: !Ref DatabaseName
+      Targets:
+        S3Targets:
+          - Path: !Sub "s3://${DestinationBucket}/${CFDataName}/"
+  AthenaQuery:
+    Type: AWS::Athena::NamedQuery
+    Properties:
+      Database: !Ref DatabaseName
+      Description: Provides a summary view of the lambda data
+      Name: !Sub ${CFDataName}-summary-view
+      QueryString: !Sub
+        "SELECT * FROM ${DatabaseName}.${CFDataName}"
+  EventPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt LambdaFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: sqs.amazonaws.com
+      SourceAccount: !Ref 'AWS::AccountId'
+      SourceArn: !GetAtt TaskQueue.Arn
+  TaskQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      VisibilityTimeout: 300
+      ReceiveMessageWaitTimeSeconds: 20
+      DelaySeconds: 2
+      KmsMasterKeyId: "alias/aws/sqs"
+      QueueName: 'EC2UtilizationModule-TaskQueue'
+  EventSourceMapping:
+    DependsOn:
+      - EventPermission
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !GetAtt TaskQueue.Arn
+      FunctionName: !GetAtt LambdaFunction.Arn
