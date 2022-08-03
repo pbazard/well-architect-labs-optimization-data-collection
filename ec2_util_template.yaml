@@ -267,20 +267,7 @@ Resources:
                        }
 
           METRICS_FOR_INSTANCES = [
-              'CPUUtilization',
-              'NetworkPacketsIn',
-              'NetworkPacketsOut',
-              'NetworkIn',
-              'NetworkOut',
-              'DiskReadBytes',
-              'DiskWriteBytes',
-              'DiskReadOps',
-              'DiskWriteOps',
-              'StatusCheckFailed',
-              'CPUCreditUsage',
-              'CPUCreditBalance',
-              'CPUSurplusCreditBalance',
-              'CPUSurplusCreditsCharged'
+              'CPUUtilization'
           ]
 
           TAGS_TO_RETRIEVE = [
